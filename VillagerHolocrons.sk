@@ -1,0 +1,538 @@
+# ====================================================================
+# Annotated security-review copy of the original Holocron script
+# Behavior is intentionally unchanged in this file.
+# Added comments mark security, integrity, compatibility, and maintenance risks.
+# ====================================================================
+
+options:
+	# Permission for the admin command that gives a holocron directly.
+	holocron-admin-permission: holocron.admin
+
+	# Display names for the two visual states of the holocron.
+	holocron-empty-name: &7Empty Holocron
+	holocron-charged-name: &bCharged Holocron
+
+	# Percent chances for obtaining an empty holocron.
+	# These are intentionally left exactly as configured.
+	holocron-ore-drop-chance: 1
+	holocron-fishing-drop-chance: 1
+
+	# Persistent data keys stored on the item itself.
+	# - state: empty / charged
+	# - id: the backing variable record for a charged holocron
+	# - serial: a unique id for the physical item instance
+	# SECURITY NOTE:
+	# These namespace keys identify a holocron, but they do NOT authenticate one.
+	# Any other plugin / command / creative-NBT workflow that can write matching tags can forge items
+	# unless you also validate ownership or a server-side registry when the item is used.
+	holocron-namespace-state: holocron:state
+	holocron-namespace-id: holocron:id
+	holocron-namespace-serial: holocron:serial
+
+	# Common chat formatting.
+	holocron-msg-prefix: &8[&bHolocron&8]&r
+
+	# If true, using a charged holocron on a villager converts it back into a fresh empty holocron.
+	holocron-reset-after-apply: true
+
+function makeEmptyHolocron() :: item:
+	# Start with an echo shard as the base item.
+	set {_item} to echo shard
+
+	# Give it the empty-state display name.
+	set name of {_item} to "{@holocron-empty-name}"
+
+	# Build the base lore shown on an unused holocron.
+	delete {_lore::*}
+	add "&8A crystalline memory shard." to {_lore::*}
+	add "&7" to {_lore::*}
+	add "&7Right-click a villager to record it." to {_lore::*}
+	add "&7Then right-click another villager" to {_lore::*}
+	add "&7with the charged holocron to" to {_lore::*}
+	add "&7overwrite it with the stored villager." to {_lore::*}
+	add "&7" to {_lore::*}
+	add "&8Stores villager NBT via SkBee." to {_lore::*}
+	add "&8Persists across reboots on the same server stack." to {_lore::*}
+	set lore of {_item} to {_lore::*}
+
+	# Mark the item as an empty holocron and give it a unique serial.
+	# SECURITY NOTE:
+	# A serial is generated here, but the script never validates that serial against server-side data later.
+	# That means the serial currently prevents stacking better than it prevents spoofing.
+	set text data tag "{@holocron-namespace-state}" of {_item} to "empty"
+	set text data tag "{@holocron-namespace-serial}" of {_item} to "%random uuid%"
+
+	# Empty holocrons should not have the enchanted glint.
+	# A fresh item normally won't, but clearing the hide-enchants flag here keeps the visual state explicit.
+	remove hide enchants from item flags of {_item}
+
+	return {_item}
+
+function applyChargedHolocronVisuals(item: item) :: item:
+	# Copy the item locally so we can modify and return it.
+	set {_item} to {_item}
+
+	# Give the holocron a harmless real enchantment.
+	# This causes Minecraft's enchantment glint to render on the item.
+	enchant {_item} with unbreaking 1
+
+	# Hide the enchant line from the tooltip so players only see the custom holocron lore,
+	# while still keeping the enchanted-item shimmer/glint.
+	add hide enchants to item flags of {_item}
+
+	return {_item}
+
+function formatHolocronEnchantId(id: text) :: text:
+	# Turn a raw enchantment id like "minecraft:sharpness" into a cleaner display label.
+	set {_label} to {_id}
+	replace all "minecraft:" with "" in {_label}
+	replace all "_" with " " in {_label}
+	set {_label} to {_label} in strict proper case
+	return {_label}
+
+function formatHolocronEnchantLevel(level: number) :: text:
+	# Villager trade books usually use vanilla levels, so Roman numerals read nicely in lore.
+	set {_n} to "%{_level}%" parsed as integer
+	if {_n} is 1:
+		return "I"
+	if {_n} is 2:
+		return "II"
+	if {_n} is 3:
+		return "III"
+	if {_n} is 4:
+		return "IV"
+	if {_n} is 5:
+		return "V"
+	if {_n} is 6:
+		return "VI"
+	if {_n} is 7:
+		return "VII"
+	if {_n} is 8:
+		return "VIII"
+	if {_n} is 9:
+		return "IX"
+	if {_n} is 10:
+		return "X"
+	return "%{_n}%"
+
+function formatHolocronItemEnchantSummary(item: item) :: text:
+	# Build a readable enchantment suffix from the parsed trade item.
+	# Enchanted books are awkward in Skript because the stored-enchant level lookup can resolve to
+	# the literal placeholder "<none>" on some versions, even when the stringified enchant text is correct.
+	# So for books we trust the stored-enchant text, sanitize it, and only append a looked-up level
+	# if Skript returns a real numeric value.
+	delete {_enchParts::*}
+
+	if type of {_item} is enchanted book:
+		loop stored enchants of {_item}:
+			set {_rawEnchant} to "%loop-value%"
+			set {_level} to enchantment level of loop-value of {_item}
+			set {_levelText} to "%{_level}%"
+
+			# Strip bad placeholders from the raw text no matter where they appear.
+			replace all "<none>" with "" in {_rawEnchant}
+			replace all "  " with " " in {_rawEnchant}
+			replace all "  " with " " in {_rawEnchant}
+
+			# If Skript gives us a real numeric level, remove it from the name and append a Roman numeral.
+			if {_level} is set:
+				if {_levelText} is not "<none>":
+					replace all " %{_level}%" with "" in {_rawEnchant}
+					set {_enchName} to formatHolocronEnchantId({_rawEnchant})
+					add "%{_enchName}% %formatHolocronEnchantLevel({_level})%" to {_enchParts::*}
+				else:
+					# Fallback: use the stored-enchant text exactly as displayed, just cleaned up.
+					set {_enchName} to formatHolocronEnchantId({_rawEnchant})
+					replace all "<none>" with "" in {_enchName}
+					replace all "  " with " " in {_enchName}
+					add "%{_enchName}%" to {_enchParts::*}
+			else:
+				# Fallback: use the stored-enchant text exactly as displayed, just cleaned up.
+				set {_enchName} to formatHolocronEnchantId({_rawEnchant})
+				replace all "<none>" with "" in {_enchName}
+				replace all "  " with " " in {_enchName}
+				add "%{_enchName}%" to {_enchParts::*}
+	else:
+		loop enchantments of {_item}:
+			set {_rawEnchant} to "%loop-value%"
+			set {_level} to enchantment level of loop-value of {_item}
+			set {_levelText} to "%{_level}%"
+
+			# Remove any trailing numeric level from the stringified enchant name.
+			if {_level} is set:
+				if {_levelText} is not "<none>":
+					replace all " %{_level}%" with "" in {_rawEnchant}
+
+			set {_enchName} to formatHolocronEnchantId({_rawEnchant})
+			replace all "<none>" with "" in {_enchName}
+
+			if {_level} is set:
+				if {_levelText} is not "<none>":
+					add "%{_enchName}% %formatHolocronEnchantLevel({_level})%" to {_enchParts::*}
+				else:
+					add "%{_enchName}%" to {_enchParts::*}
+			else:
+				add "%{_enchName}%" to {_enchParts::*}
+
+	# Return an empty string if the item has no enchantments at all.
+	if size of {_enchParts::*} <= 0:
+		return ""
+
+	# Join multiple enchantments into one compact summary.
+	set {_summary} to ""
+	loop {_enchParts::*}:
+		if {_summary} is "":
+			set {_summary} to loop-value
+		else:
+			set {_summary} to "%{_summary}%, %loop-value%"
+
+	# Final cleanup in case any placeholder text slipped through from Skript stringification.
+	replace all "<none>" with "" in {_summary}
+	replace all "  " with " " in {_summary}
+	replace all " ," with "," in {_summary}
+	return {_summary}
+
+function formatHolocronTradeStack(itemNbt: object) :: text:
+	# Convert the trade's raw item NBT into a real item so Skript can read it naturally.
+	set {_item} to item from nbt {_itemNbt}
+
+	# Fallback in case an item cannot be parsed for some reason.
+	if {_item} is not set:
+		return "&7No Item"
+
+	# Prefer a custom item name when present, otherwise fall back to the material/type name.
+	if name of {_item} is set:
+		set {_label} to "%name of {_item}%"
+	else:
+		set {_label} to "%type of {_item}%"
+
+	# Build a human-readable enchantment summary for any enchanted sell item.
+	# Examples:
+	# - enchanted book -> "Mending I"
+	# - diamond chestplate -> "Diamond Chestplate (Protection IV, Unbreaking III)"
+	set {_enchSummary} to formatHolocronItemEnchantSummary({_item})
+	if {_enchSummary} is not "":
+		# For enchanted books, the enchantment itself is more useful than the base item label.
+		if type of {_item} is enchanted book:
+			return "&f%amount of {_item}%x %{_enchSummary}%"
+		# For other enchanted items, keep the item identity and append the enchant list.
+		return "&f%amount of {_item}%x %{_label}% &8(%{_enchSummary}%)"
+
+	# Build a compact readable line such as "16x emerald".
+	return "&f%amount of {_item}%x %{_label}%"
+
+	# SECURITY NOTE:
+	# This lore is only a human-readable summary. The actual overwrite uses the stored raw villager NBT below,
+	# so any hidden fields preserved in the NBT will still be cloned even if they are not shown in the lore.
+function buildHolocronTradeLore(v: living entity) :: texts:
+	# Read the villager's NBT and pull the Offers -> Recipes list.
+	# SkBee supports nested tags with semicolon separators, so "Offers;Recipes"
+	# drills into the villager's offers compound and returns the recipe list.
+	set {_villagerNbt} to nbt compound from {_v}
+	set {_recipes::*} to compound list tag "Offers;Recipes" of {_villagerNbt}
+
+	delete {_lore::*}
+	add "&bTrades:" to {_lore::*}
+
+	if {_v} is not a villager:
+		add "&7- &fNo villager trades recorded" to {_lore::*}
+		return {_lore::*}
+
+	# If the villager somehow has no trade list, show that explicitly.
+	if size of {_recipes::*} <= 0:
+		add "&7- &fNo trades recorded" to {_lore::*}
+		return {_lore::*}
+
+	# Each recipe compound contains:
+	# - buy  = first required input item
+	# - buyB = optional second required input item
+	# - sell = output item sold by the villager
+	loop {_recipes::*}:
+		set {_buyText} to formatHolocronTradeStack(compound tag "buy" of loop-value)
+		set {_sellText} to formatHolocronTradeStack(compound tag "sell" of loop-value)
+
+		# Use two lore lines per trade so longer enchanted-book summaries fit cleanly.
+		if compound tag "buyB" of loop-value is set:
+			set {_buyBText} to formatHolocronTradeStack(compound tag "buyB" of loop-value)
+			add "&7%loop-index%. %{_buyText}% &8+ %{_buyBText}%" to {_lore::*}
+		else:
+			add "&7%loop-index%. %{_buyText}%" to {_lore::*}
+
+		add "&8   → %{_sellText}%" to {_lore::*}
+
+	return {_lore::*}
+
+	# AUDIT NOTE:
+	# This function returns :: objects even though the payload is used like a text list for lore.
+	# That is usually tolerated, but :: texts is the more precise return type for maintenance.
+function makeChargedHolocronLore(id: text) :: objects:
+	# Assemble the lore for a charged holocron from the data stored in variables.
+	delete {_lore::*}
+	add "&8Recorded Villager Data" to {_lore::*}
+	add "&7" to {_lore::*}
+	add "&7Profession: &f%{holocron.profession::%{_id}%}%" to {_lore::*}
+	add "&7Type: &f%{holocron.type::%{_id}%}%" to {_lore::*}
+	add "&7Level: &f%{holocron.level::%{_id}%}%" to {_lore::*}
+
+	# Only show the villager's custom name if it had one.
+	if {holocron.customname::%{_id}%} is set:
+		add "&7Name: &f%{holocron.customname::%{_id}%}%" to {_lore::*}
+
+	add "&7" to {_lore::*}
+
+	# Append the trade list that was captured when the villager was recorded.
+	if {holocron.trades::%{_id}%::*} is set:
+		loop {holocron.trades::%{_id}%::*}:
+			add loop-value to {_lore::*}
+	else:
+		add "&bTrades:" to {_lore::*}
+		add "&7- &fNo trade summary stored" to {_lore::*}
+
+	add "&7" to {_lore::*}
+	add "&8Use on another villager to overwrite it." to {_lore::*}
+
+	return {_lore::*}
+
+function deleteHolocronRecord(id: text):
+	# Remove all stored data associated with a charged holocron id.
+	delete {holocron.nbt::%{_id}%}
+	delete {holocron.profession::%{_id}%}
+	delete {holocron.type::%{_id}%}
+	delete {holocron.level::%{_id}%}
+	delete {holocron.customname::%{_id}%}
+	delete {holocron.trades::%{_id}%::*}
+
+	# SECURITY NOTE:
+	# This sanitiser removes movement/runtime fields, but it still preserves most of the entity payload.
+	# That includes profession/level/offers as intended, but it may also preserve plugin-added tags,
+	# AI flags, persistence flags, passengers, leash state, gossip, memories, or other fields you may not want cloned.
+function sanitizeVillagerNbt(raw: text) :: text:
+	# Convert the raw NBT text back into a mutable compound.
+	set {_nbt} to nbt compound from {_raw}
+
+	# Strip transient / location-specific runtime data so the villager can be respawned cleanly.
+	delete tag "UUID" of {_nbt}
+	delete tag "Pos" of {_nbt}
+	delete tag "Rotation" of {_nbt}
+	delete tag "Motion" of {_nbt}
+	delete tag "OnGround" of {_nbt}
+	delete tag "PortalCooldown" of {_nbt}
+	delete tag "FallDistance" of {_nbt}
+	delete tag "Air" of {_nbt}
+	delete tag "Fire" of {_nbt}
+	delete tag "TicksFrozen" of {_nbt}
+	delete tag "HurtTime" of {_nbt}
+	delete tag "DeathTime" of {_nbt}
+	delete tag "AttackTime" of {_nbt}
+
+	# Return the cleaned compound back as text for variable storage.
+	return "%{_nbt}%"
+
+function isHolocronOre(b: block) :: boolean:
+	# Centralized ore whitelist for holocron drops.
+	if {_b} is coal ore:
+		return true
+	else if {_b} is deepslate coal ore:
+		return true
+	else if {_b} is copper ore:
+		return true
+	else if {_b} is deepslate copper ore:
+		return true
+	else if {_b} is iron ore:
+		return true
+	else if {_b} is deepslate iron ore:
+		return true
+	else if {_b} is gold ore:
+		return true
+	else if {_b} is deepslate gold ore:
+		return true
+	else if {_b} is redstone ore:
+		return true
+	else if {_b} is deepslate redstone ore:
+		return true
+	else if {_b} is lapis ore:
+		return true
+	else if {_b} is deepslate lapis ore:
+		return true
+	else if {_b} is emerald ore:
+		return true
+	else if {_b} is deepslate emerald ore:
+		return true
+	else if {_b} is diamond ore:
+		return true
+	else if {_b} is deepslate diamond ore:
+		return true
+	else if {_b} is nether quartz ore:
+		return true
+	else if {_b} is nether gold ore:
+		return true
+	else if {_b} is ancient debris:
+		return true
+
+	return false
+
+command /holocron:
+	permission: {@holocron-admin-permission}
+	trigger:
+		# Simple admin helper for spawning a test holocron.
+		give makeEmptyHolocron() to player
+		send "{@holocron-msg-prefix} &aYou received an Empty Holocron." to player
+
+on break:
+	# Some break events may not have a player context (depending on the cause), so bail out safely.
+	if player is not set:
+		stop
+
+	# SECURITY NOTE:
+	# This does not distinguish naturally-generated ores from player-placed ores.
+	# If your server allows silk-touch ore moving or custom ore placement, players can farm holocrons repeatedly.
+	# If the broken block is one of the allowed ores, roll the configured drop chance.
+	if isHolocronOre(event-block) is true:
+		chance of {@holocron-ore-drop-chance}%:
+			drop makeEmptyHolocron() at location of event-block
+			send "{@holocron-msg-prefix} &dAn Empty Holocron drops from the ore." to player
+
+on fish catch:
+	# Copy the configured chance into a variable for simpler branching.
+	set {_chance} to {@holocron-fishing-drop-chance}
+
+	# 0 or below means disabled.
+	if {_chance} <= 0:
+		stop
+
+	# 100 or above means guaranteed.
+	if {_chance} >= 100:
+		drop makeEmptyHolocron() at location of player
+		send "{@holocron-msg-prefix} &bYou fished up an Empty Holocron." to player
+		stop
+
+	# Otherwise, roll the configured percent chance.
+	chance of {_chance}%:
+		drop makeEmptyHolocron() at location of player
+		send "{@holocron-msg-prefix} &bYou fished up an Empty Holocron." to player
+
+	# SECURITY NOTE:
+	# This handler does not check whether the event was already cancelled by a protection plugin,
+	# and it does not distinguish main-hand from off-hand interaction.
+	# On some server/plugin stacks, that can create protection bypass risk or hand-desync bugs.
+on right click on villager:
+	# Cache the held item at the start of the interaction.
+	set {_tool} to player's tool
+
+	# Ignore empty hands.
+	if {_tool} is air:
+		stop
+
+	# Only echo shards can ever be holocrons.
+	if type of {_tool} is not echo shard:
+		stop
+
+	# SECURITY NOTE:
+	# Presence of the state tag is treated as proof of authenticity.
+	# If a player can obtain an echo shard with matching tags through another plugin/admin mistake,
+	# they can impersonate a holocron or point a forged charged holocron at an existing stored record id.
+	# Ignore ordinary echo shards by requiring the custom persistent data tag.
+	if {_tool} does not have persistent data tag "{@holocron-namespace-state}":
+		stop
+
+	# We are handling the interaction ourselves, so prevent normal villager trading/opening.
+	cancel event
+
+	# Read the item state and the clicked villager.
+	set {_state} to text data tag "{@holocron-namespace-state}" of {_tool}
+	set {_villager} to event-entity
+
+	if {_state} = "empty":
+		# Generate a storage id for this villager snapshot.
+		set {_id} to "%random uuid%"
+
+		# SECURITY NOTE:
+		# This stores an almost-full villager snapshot, not just profession + offers.
+		# From a gameplay perspective this means the holocron is effectively a villager cloning / transplant tool.
+		# On economy servers this is a severe balance risk unless tightly permissioned or region-limited.
+		# Snapshot and sanitize the villager's NBT so it can be respawned later.
+		set {_villagerNbt} to nbt compound from {_villager}
+		set {_rawNbt} to "%{_villagerNbt}%"
+		set {holocron.nbt::%{_id}%} to sanitizeVillagerNbt({_rawNbt})
+
+		# Store a readable summary for lore and debugging.
+		set {holocron.profession::%{_id}%} to "%villager profession of {_villager}%"
+		set {holocron.type::%{_id}%} to "%villager type of {_villager}%"
+		set {holocron.level::%{_id}%} to "%villager level of {_villager}%"
+
+		# Preserve custom names if the villager has one.
+		if name of {_villager} is set:
+			set {holocron.customname::%{_id}%} to "%name of {_villager}%"
+		else:
+			delete {holocron.customname::%{_id}%}
+
+		# Capture a readable copy of all visible trades so the lore can show them directly.
+		delete {holocron.trades::%{_id}%::*}
+		loop buildHolocronTradeLore({_villager}):
+			add loop-value to {holocron.trades::%{_id}%::*}
+
+		# SECURITY NOTE:
+		# The item is marked charged, but no owner binding, signature check, or serial-to-record binding is enforced.
+		# A duplicated or externally-forged item can still reference the same backing id.
+		# Flip the held item into its charged state.
+		set text data tag "{@holocron-namespace-state}" of player's tool to "charged"
+		set text data tag "{@holocron-namespace-id}" of player's tool to {_id}
+		set {_tool} to player's tool
+		set name of {_tool} to "{@holocron-charged-name}"
+		set lore of {_tool} to makeChargedHolocronLore({_id})
+		set {_tool} to applyChargedHolocronVisuals({_tool})
+		set player's tool to {_tool}
+
+		send "{@holocron-msg-prefix} &bHolocron charged with a %villager profession of {_villager}%." to player
+		stop
+
+		# SECURITY NOTE:
+		# Multiple physical items can point at the same stored id if the item is duplicated outside this script.
+		# The first successful use will delete the shared record; the rest become stale/broken charged holocrons.
+	if {_state} = "charged":
+		# Charged holocrons must have a backing stored id.
+		if player's tool does not have persistent data tag "{@holocron-namespace-id}":
+			send "{@holocron-msg-prefix} &cThis charged holocron has no stored id." to player
+			stop
+
+		set {_id} to text data tag "{@holocron-namespace-id}" of player's tool
+
+		# If the backing record vanished, abort rather than creating a broken villager.
+		if {holocron.nbt::%{_id}%} is not set:
+			send "{@holocron-msg-prefix} &cThe stored villager data is missing." to player
+			stop
+
+		# Save the target villager's exact position and facing before replacement.
+		set {_targetLoc} to location of {_villager}
+		set {_targetYaw} to yaw of {_targetLoc}
+		set {_targetPitch} to pitch of {_targetLoc}
+		set {_storedNbt} to nbt compound from {holocron.nbt::%{_id}%}
+
+		# SECURITY NOTE:
+		# The target villager is deleted BEFORE spawn success is verified.
+		# If the spawn fails because of invalid NBT, region rules, entity caps, or addon incompatibility,
+		# the original villager is already gone and the record is still at risk of later cleanup.
+		# Remove the original villager silently, then spawn the replacement.
+		# Using delete on the entity itself avoids the normal death/kill animation.
+		delete entity within {_villager}
+		spawn villager at {_targetLoc} with nbt {_storedNbt}
+		set yaw of last spawned entity's location to {_targetYaw}
+		set pitch of last spawned entity's location to {_targetPitch}
+
+		send "{@holocron-msg-prefix} &aVillager overwritten from the Holocron." to player
+
+		# AUDIT NOTE:
+		# This cleanup assumes the replacement definitely succeeded.
+		# A hardened version should verify the spawned entity exists and is a villager before deleting the record.
+		# Clean up the backing stored record once the overwrite succeeds.
+		deleteHolocronRecord({_id})
+
+		# SECURITY NOTE:
+		# If reset-after-apply is false, one charged holocron becomes an unlimited-use villager template.
+		# If it is true, duplicated copies of the same charged item will still exist but will no longer have valid data.
+		# Either consume the charge and revert to empty, or leave the item charged depending on config.
+		set {_resetAfterApply} to "{@holocron-reset-after-apply}"
+		if {_resetAfterApply} is "true":
+			set player's tool to makeEmptyHolocron()
+		else:
+			send "{@holocron-msg-prefix} &eThe holocron remains charged." to player
