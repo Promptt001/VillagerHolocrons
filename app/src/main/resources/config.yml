@@ -1,0 +1,44 @@
+messages:
+  prefix: "&8[&bHolocron&8]&r"
+  received-empty: "&aYou received an Empty Holocron."
+  ore-drop: "&dAn Empty Holocron drops from the ore."
+  fishing-drop: "&bYou fished up an Empty Holocron."
+  charged: "&bHolocron charged with a %profession%."
+  applied: "&aVillager overwritten from the Holocron."
+  remains-charged: "&eThe holocron remains charged."
+  missing-id: "&cThis charged holocron has no stored id."
+  missing-record: "&cThe stored villager data is missing."
+  player-only: "&cOnly players can use this command."
+
+permissions:
+  admin: "holocron.admin"
+
+items:
+  empty-name: "&7Empty Holocron"
+  charged-name: "&bCharged Holocron"
+  reset-after-apply: true
+
+chances:
+  ore-drop: 1.0
+  fishing-drop: 1.0
+
+ore-materials:
+  - COAL_ORE
+  - DEEPSLATE_COAL_ORE
+  - COPPER_ORE
+  - DEEPSLATE_COPPER_ORE
+  - IRON_ORE
+  - DEEPSLATE_IRON_ORE
+  - GOLD_ORE
+  - DEEPSLATE_GOLD_ORE
+  - REDSTONE_ORE
+  - DEEPSLATE_REDSTONE_ORE
+  - LAPIS_ORE
+  - DEEPSLATE_LAPIS_ORE
+  - EMERALD_ORE
+  - DEEPSLATE_EMERALD_ORE
+  - DIAMOND_ORE
+  - DEEPSLATE_DIAMOND_ORE
+  - NETHER_QUARTZ_ORE
+  - NETHER_GOLD_ORE
+  - ANCIENT_DEBRIS
