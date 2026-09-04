@@ -29,6 +29,8 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
+import net.kyori.adventure.text.Component;
+
 import io.github.migrated.villagerholocrons.model.VillagerRecord;
 import io.github.migrated.villagerholocrons.storage.RecordsRepository;
 import io.github.migrated.villagerholocrons.util.Text;
@@ -112,8 +114,8 @@ public final class HolocronListener implements Listener {
             return item;
         }
 
-        meta.setDisplayName(Text.color(this.plugin.getConfig().getString("items.empty-name", "&7Empty Holocron")));
-        meta.setLore(Text.buildEmptyHolocronLore());
+        meta.displayName(Text.component(this.plugin.getConfig().getString("items.empty-name", "&7Empty Holocron")));
+        meta.lore(Text.buildEmptyHolocronLore());
         meta.removeEnchant(Enchantment.UNBREAKING);
         meta.removeItemFlags(ItemFlag.HIDE_ENCHANTS);
 
@@ -135,8 +137,8 @@ public final class HolocronListener implements Listener {
             return;
         }
 
-        meta.setDisplayName(Text.color(this.plugin.getConfig().getString("items.charged-name", "&bCharged Holocron")));
-        meta.setLore(Text.buildChargedHolocronLore(record));
+        meta.displayName(Text.component(this.plugin.getConfig().getString("items.charged-name", "&bCharged Holocron")));
+        meta.lore(Text.buildChargedHolocronLore(record));
         meta.addEnchant(Enchantment.UNBREAKING, 1, true);
         meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
 
@@ -211,7 +213,7 @@ public final class HolocronListener implements Listener {
 
     private void send(Player player, String body) {
         String prefix = this.plugin.getConfig().getString("messages.prefix", "&8[&bHolocron&8]&r");
-        player.sendMessage(Text.color(prefix + " " + body));
+        player.sendMessage(Text.component(prefix + " " + body));
     }
 
     private boolean roll(double chancePercent) {

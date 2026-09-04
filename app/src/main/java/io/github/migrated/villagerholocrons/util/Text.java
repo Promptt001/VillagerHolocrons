@@ -5,7 +5,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
 
-import org.bukkit.ChatColor;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
@@ -16,17 +19,29 @@ import io.github.migrated.villagerholocrons.model.TradeRecord;
 import io.github.migrated.villagerholocrons.model.VillagerRecord;
 
 public final class Text {
+    /**
+     * Serializer for config strings that still use legacy {@code &}-color-codes
+     * (kept for user-facing config.yml compatibility).
+     */
+    private static final LegacyComponentSerializer LEGACY_AMPERSAND = LegacyComponentSerializer.legacyAmpersand();
+
     private Text() {
     }
 
-    public static String color(String input) {
-        return ChatColor.translateAlternateColorCodes('&', input);
+    /**
+     * Converts a legacy {@code &}-color-coded string into an Adventure {@link Component}.
+     */
+    public static Component component(String input) {
+        return LEGACY_AMPERSAND.deserialize(input == null ? "" : input);
     }
 
-    public static List<String> color(List<String> lines) {
-        List<String> out = new ArrayList<>();
+    /**
+     * Converts legacy {@code &}-color-coded strings into Adventure {@link Component}s.
+     */
+    public static List<Component> component(List<String> lines) {
+        List<Component> out = new ArrayList<>();
         for (String line : lines) {
-            out.add(color(line));
+            out.add(component(line));
         }
         return out;
     }
@@ -59,11 +74,15 @@ public final class Text {
         };
     }
 
+    /**
+     * Describes an item as a legacy {@code &}-color-coded string; callers convert
+     * it to a {@link Component} via {@link #component(String)} when assembling lore.
+     */
     public static String formatItemStack(ItemStack item) {
         String label = prettifyEnum(item.getType().name());
         ItemMeta meta = item.getItemMeta();
         if (meta != null && meta.hasDisplayName()) {
-            label = meta.getDisplayName();
+            label = PlainTextComponentSerializer.plainText().serialize(meta.displayName());
         }
 
         String enchantSummary = enchantSummary(item);
@@ -97,7 +116,7 @@ public final class Text {
         return prettifyEnum(key.toUpperCase());
     }
 
-    public static List<String> buildEmptyHolocronLore() {
+    public static List<Component> buildEmptyHolocronLore() {
         List<String> lore = new ArrayList<>();
         lore.add("&8A crystalline memory shard.");
         lore.add("&7");
@@ -108,10 +127,10 @@ public final class Text {
         lore.add("&7");
         lore.add("&8Stores villager profession, level,");
         lore.add("&8experience, name, and trades.");
-        return color(lore);
+        return component(lore);
     }
 
-    public static List<String> buildChargedHolocronLore(VillagerRecord record) {
+    public static List<Component> buildChargedHolocronLore(VillagerRecord record) {
         List<String> lore = new ArrayList<>();
         lore.add("&8Recorded Villager Data");
         lore.add("&7");
@@ -143,6 +162,6 @@ public final class Text {
         }
         lore.add("&7");
         lore.add("&8Use on another villager to overwrite it.");
-        return color(lore);
+        return component(lore);
     }
 }

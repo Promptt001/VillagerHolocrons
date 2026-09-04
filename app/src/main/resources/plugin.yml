@@ -1,10 +1,10 @@
 name: VillagerHolocrons
-version: 1.0.0
+version: 1.1.0-beta.1
 main: io.github.migrated.villagerholocrons.VillagerHolocronsPlugin
 description: PaperMC port of the Villager Holocrons Skript project.
 author: Converted from Skript template project
 website: https://papermc.io
-api-version: '1.21'
+api-version: '26.2'
 commands:
   holocron:
     description: Gives you an empty holocron.

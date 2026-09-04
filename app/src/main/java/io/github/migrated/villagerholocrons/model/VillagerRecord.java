@@ -2,8 +2,14 @@ package io.github.migrated.villagerholocrons.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Ageable;
 import org.bukkit.entity.Villager;
@@ -46,12 +52,13 @@ public final class VillagerRecord {
         for (MerchantRecipe recipe : villager.getRecipes()) {
             tradeRecords.add(TradeRecord.fromRecipe(recipe));
         }
-        String customName = villager.getCustomName();
+        Component nameComponent = villager.customName();
+        String customName = nameComponent == null ? null : LegacyComponentSerializer.legacySection().serialize(nameComponent);
         boolean adult = !(villager instanceof Ageable ageable) || ageable.isAdult();
         return new VillagerRecord(
                 UUID.randomUUID().toString(),
-                villager.getProfession().name(),
-                villager.getVillagerType().name(),
+                enumKey(villager.getProfession()),
+                enumKey(villager.getVillagerType()),
                 villager.getVillagerLevel(),
                 villager.getVillagerExperience(),
                 adult,
@@ -61,8 +68,8 @@ public final class VillagerRecord {
     }
 
     public void applyTo(Villager villager) {
-        villager.setProfession(Villager.Profession.valueOf(this.profession));
-        villager.setVillagerType(Villager.Type.valueOf(this.villagerType));
+        villager.setProfession(parseProfession(this.profession));
+        villager.setVillagerType(parseType(this.villagerType));
         villager.setVillagerLevel(this.villagerLevel);
         villager.setVillagerExperience(this.villagerExperience);
         if (villager instanceof Ageable ageable) {
@@ -72,7 +79,11 @@ public final class VillagerRecord {
                 ageable.setBaby();
             }
         }
-        villager.setCustomName(this.customName);
+        if (this.customName != null) {
+            villager.customName(LegacyComponentSerializer.legacySection().deserialize(this.customName));
+        } else {
+            villager.customName((Component) null);
+        }
         villager.setCustomNameVisible(this.customName != null && this.customNameVisible);
 
         List<MerchantRecipe> recipes = new ArrayList<>();
@@ -112,8 +123,8 @@ public final class VillagerRecord {
 
         return new VillagerRecord(
                 id,
-                section.getString("profession", Villager.Profession.NONE.name()),
-                section.getString("villagerType", Villager.Type.PLAINS.name()),
+                section.getString("profession", enumKey(Villager.Profession.NONE)),
+                section.getString("villagerType", enumKey(Villager.Type.PLAINS)),
                 section.getInt("villagerLevel", 1),
                 section.getInt("villagerExperience", 0),
                 section.getBoolean("adult", true),
@@ -144,5 +155,37 @@ public final class VillagerRecord {
 
     public List<TradeRecord> getTrades() {
         return new ArrayList<>(this.trades);
+    }
+
+    /**
+     * Stable string form of a villager enum constant (matches the old {@code name()}
+     * values stored in records.yml), derived from its keyed name.
+     */
+    private static String enumKey(org.bukkit.Keyed keyed) {
+        return keyed.getKey().getKey().toUpperCase(Locale.ROOT);
+    }
+
+    private static Villager.Profession parseProfession(String raw) {
+        try {
+            Villager.Profession profession = Registry.VILLAGER_PROFESSION.get(NamespacedKey.minecraft(raw.toLowerCase(Locale.ROOT)));
+            if (profession != null) {
+                return profession;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // fall through to default below
+        }
+        return Villager.Profession.NONE;
+    }
+
+    private static Villager.Type parseType(String raw) {
+        try {
+            Villager.Type type = Registry.VILLAGER_TYPE.get(NamespacedKey.minecraft(raw.toLowerCase(Locale.ROOT)));
+            if (type != null) {
+                return type;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // fall through to default below
+        }
+        return Villager.Type.PLAINS;
     }
 }

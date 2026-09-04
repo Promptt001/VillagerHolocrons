@@ -1,13 +1,9 @@
 package io.github.migrated.villagerholocrons;
 
-import java.io.File;
-
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.plugin.java.JavaPluginLoader;
 
 import io.github.migrated.villagerholocrons.storage.RecordsRepository;
 import io.github.migrated.villagerholocrons.util.Text;
@@ -15,14 +11,6 @@ import io.github.migrated.villagerholocrons.util.Text;
 public final class VillagerHolocronsPlugin extends JavaPlugin {
     private RecordsRepository recordsRepository;
     private HolocronListener holocronListener;
-
-    public VillagerHolocronsPlugin() {
-        super();
-    }
-
-    protected VillagerHolocronsPlugin(JavaPluginLoader loader, PluginDescriptionFile description, File dataFolder, File file) {
-        super(loader, description, dataFolder, file);
-    }
 
     @Override
     public void onEnable() {
@@ -47,7 +35,7 @@ public final class VillagerHolocronsPlugin extends JavaPlugin {
             return false;
         }
         if (!(sender instanceof Player player)) {
-            sender.sendMessage(Text.color(getConfig().getString("messages.player-only", "&cOnly players can use this command.")));
+            sender.sendMessage(Text.component(getConfig().getString("messages.player-only", "&cOnly players can use this command.")));
             return true;
         }
 
@@ -63,6 +51,6 @@ public final class VillagerHolocronsPlugin extends JavaPlugin {
 
     private void send(Player player, String body) {
         String prefix = getConfig().getString("messages.prefix", "&8[&bHolocron&8]&r");
-        player.sendMessage(Text.color(prefix + " " + body));
+        player.sendMessage(Text.component(prefix + " " + body));
     }
 }
